@@ -1,5 +1,3 @@
-/*jshint esversion: 6 */
-
 import { ConfigurableLogger, Hasher, Logger, LoggerOptions, Writer } from '../reporting';
 
 import * as retire from '../retire';
@@ -7,6 +5,7 @@ import * as fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { Finding } from '../types';
 import { generatePURL } from './utils';
+import * as path from 'path';
 
 function configureCycloneDXJSONLogger(logger: Logger, writer: Writer, config: LoggerOptions, hash: Hasher) {
   let vulnsFound = false;
@@ -34,9 +33,13 @@ function configureCycloneDXJSONLogger(logger: Logger, writer: Writer, config: Lo
     }
   };
 
+  type Component = {
+    properties: Array<{ name: string; value: string }>;
+  };
+
   logger.close = function (callback) {
     const write = vulnsFound ? writer.err : writer.out;
-    const seen = new Set<string>();
+    const seen = new Map<string, Component>();
     const components = finalResults.data
       .filter((d) => d.results)
       .map((r) =>
@@ -45,8 +48,11 @@ function configureCycloneDXJSONLogger(logger: Logger, writer: Writer, config: Lo
             dep.version = (dep.version.split('.').length >= 3 ? dep.version : dep.version + '.0').replace(/-/g, '.');
             let hashes;
             const filepath = r.file;
+            const properties = [];
             if (filepath) {
               const file = fs.readFileSync(filepath);
+              const relativePath = path.relative(process.cwd(), filepath);
+              properties.push({ name: 'location', value: relativePath });
               hashes = [
                 { alg: 'MD5', content: hash.md5(file) },
                 { alg: 'SHA-1', content: hash.sha1(file) },
@@ -55,15 +61,25 @@ function configureCycloneDXJSONLogger(logger: Logger, writer: Writer, config: Lo
               ];
             }
             const purl = generatePURL(dep);
-            if (seen.has(purl)) return undefined;
-            seen.add(purl);
-            return {
+            const existing = seen.get(purl);
+            if (existing) {
+              const missing = properties.filter((p) => !existing.properties.some((ep) => ep.value === p.value));
+              existing.properties.push(...missing);
+              return undefined;
+            }
+            const nameParts = dep.component.split('/').reverse();
+            const result = {
               type: 'library',
-              name: dep.component,
+              name: nameParts[0],
+              group: nameParts[1],
               version: dep.version,
               purl: purl,
               hashes: hashes,
+              licenses: mapLicenses(dep.licenses),
+              properties,
             };
+            seen.set(purl, result);
+            return result;
           })
           .filter((x) => x != undefined),
       )
@@ -93,6 +109,13 @@ function configureCycloneDXJSONLogger(logger: Logger, writer: Writer, config: Lo
     );
     writer.close(callback);
   };
+}
+
+function mapLicenses(licenses: string[] | undefined) {
+  if (!licenses) return [];
+  if (licenses.length == 0) return [];
+  if (licenses[0] == 'commercial') return [{ license: { name: 'Commercial' } }];
+  return [{ expression: licenses[0] }];
 }
 
 export default {

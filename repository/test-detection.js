@@ -6,6 +6,8 @@ const testCases = require("./testcases.json");
 const retire = require("../node/lib/retire.js");
 const repo = require("../node/lib/repo.js");
 const reporting = require("../node/lib/reporting.js");
+const deepScan = require("../node/lib/deepscan.js").deepScan;
+const queries = require("./jsrepository-ast.js").queries;
 const options = {
   log: reporting.open({}),
 };
@@ -28,6 +30,15 @@ async function dl(uri) {
   return new Promise((resolve, reject) => {
     if (dlCache[uri]) return resolve(dlCache[uri]);
     let d = https.get(uri, (res) => {
+      if (res.statusCode != 200)
+        return reject(
+          "Could not download: " +
+            uri +
+            " - status: " +
+            res.statusCode +
+            " " +
+            res.statusMessage
+        );
       let d = [];
       res.on("data", (data) => d.push(data));
       res.on("end", () => {
@@ -75,6 +86,8 @@ async function runTests(jsRepo) {
         contentOnly,
         additionalVersions,
         allowedOtherComponents,
+        allowAstMiss,
+        allowContentMiss,
       } = tcontent;
       if (limit) {
         versions = Array.from(
@@ -121,7 +134,7 @@ async function runTests(jsRepo) {
           try {
             content = await dl(t);
           } catch (e) {
-            if (e.message.includes("Failed to download")) {
+            if (e.message && e.message.includes("Failed to download")) {
               console.log("Failed to download, ignoring");
               continue;
             }
@@ -131,17 +144,22 @@ async function runTests(jsRepo) {
             }
             exitWithError(`Failed to download ${t}: ${e}`);
           }
+          const cRs = Date.now();
           let contentResults = retire.scanFileContent(content, jsRepo, hash);
+          const cRt = Date.now() - cRs;
           if (allowedOtherComponents)
             contentResults = contentResults.filter(
               (x) => !allowedOtherComponents.includes(x.component)
             );
-          if (contentResults.length == 0) {
+          const canSkipContent =
+            allowContentMiss && allowContentMiss.includes(version);
+          if (contentResults.length == 0 && !canSkipContent) {
             exitWithError(
               `Did not detect ${version} of ${name} using content on ${t}`
             );
           }
           if (
+            !canSkipContent &&
             contentResults.length > 1 &&
             contentResults[0].component != "jquery-ui"
           ) {
@@ -152,19 +170,63 @@ async function runTests(jsRepo) {
                 .join(", ")}`
             );
           }
-          if (contentResults[0].component != name) {
+          if (!canSkipContent && contentResults[0].component != name) {
             exitWithError(
               `Wrong component for ${version} of ${name} using uri or filename on ${t}: ${contentResults[0].component}`
             );
           }
-          if (!contentResults[0].version.startsWith(version)) {
+          if (
+            !canSkipContent &&
+            !contentResults[0].version.startsWith(version)
+          ) {
             exitWithError(
               `Wrong version for ${version} of ${name} using content on ${t}: ${contentResults[0].version}`
             );
           }
-          success(
-            `  - ${contentResults[0].component} @ ${contentResults[0].version}`
-          );
+          let bRt = "-";
+          if (queries[name]) {
+            const bRs = Date.now();
+            let astResults = unique(deepScan(content.toString(), jsRepo));
+            bRt = Date.now() - bRs;
+            if (allowedOtherComponents)
+              astResults = astResults.filter(
+                (x) => !allowedOtherComponents.includes(x.component)
+              );
+
+            if (
+              astResults.length == 0 &&
+              (!allowAstMiss || !allowAstMiss.includes(version))
+            ) {
+              exitWithError(
+                `Did not detect ${version} of ${name} using ast on ${t}`
+              );
+            }
+            if (astResults.length > 1) {
+              exitWithError(
+                `Detect multiple components in ${name} using ast on ${t} : ${astResults
+                  .map((a) => a.component + " " + a.version)
+                  .join(", ")}`
+              );
+            }
+            if (
+              (!allowAstMiss || !allowAstMiss.includes(version)) &&
+              astResults[0].component != name
+            ) {
+              exitWithError(
+                `Wrong component for ${version} of ${name} using ast on ${t}: ${astResults[0].component}`
+              );
+            }
+            if (
+              (!allowAstMiss || !allowAstMiss.includes(version)) &&
+              !astResults[0].version.startsWith(version)
+            ) {
+              exitWithError(
+                `Wrong version for ${version} of ${name} using ast on ${t}: ${astResults[0].version}`
+              );
+            }
+          }
+
+          success(`  - ${name} @ ${version}  C: ${cRt}ms B: ${bRt}ms`);
         }
       }
     }
@@ -172,8 +234,22 @@ async function runTests(jsRepo) {
   }
 }
 
+function unique(a) {
+  return a.reduce((p, c) => {
+    const existing = p.find((x) => x.component == c.component);
+    if (existing) {
+      if (existing.version.split("-")[0] == c.version.split("-")[0]) {
+        existing.version = existing.version.split("-")[0];
+        return p;
+      }
+    }
+    p.push(c);
+    return p;
+  }, []);
+}
+
 repo
-  .loadrepositoryFromFile("./jsrepository.json", options)
+  .loadrepositoryFromFile("./jsrepository-v2.json", options)
   .then((jsRepo) => runTests(jsRepo))
   .then(() => console.log("Done!"))
   .catch((err) => console.warn("Failed!", err));

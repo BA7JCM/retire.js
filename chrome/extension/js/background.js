@@ -1,10 +1,13 @@
 /* global chrome, console, exports, CryptoJS, Emitter */
 
 const repoUrl =
-  "https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository.json";
+  "https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository-v3.json";
 let updatedAt = Date.now();
 let repo;
+let backdoorData;
 let repoFuncs;
+
+const retire = retirechrome.retire;
 
 let vulnerable = {};
 const events = new Emitter();
@@ -30,8 +33,21 @@ async function download(url) {
 async function downloadRepo() {
   console.log("Downloading repo ...");
   updatedAt = Date.now();
-  const repoData = await download(repoUrl + "?" + updatedAt);
-  repo = JSON.parse(retire.replaceVersion(repoData));
+  let repoData = JSON.stringify(retirechrome.repo);
+  try {
+    const dlRepo = await download(repoUrl + "?" + updatedAt);
+    repoData = dlRepo;
+  } catch (e) {
+    console.error(
+      "Failed to download repo from " + repoUrl + " - Using local data",
+      e
+    );
+  }
+  const parsedRepo = JSON.parse(retire.replaceVersion(repoData));
+  repo = parsedRepo.advisories;
+  backdoorData = parsedRepo.backdoored;
+  console.log(repo);
+  console.log(backdoorData);
   console.log("Done");
   vulnerable = {};
   setFuncs();
@@ -52,6 +68,34 @@ function getFileName(url) {
   return (a.pathname.match(/\/([^\/?#]+)$/i) || [, ""])[1];
 }
 
+function scanUrlBackdoored(url) {
+  console.log("Scanning url for bd: ", url);
+  const matches = Object.entries(backdoorData).filter(([title, advisories]) => {
+    return advisories.some((advisory) => {
+      return advisory.extractors.some((e) => {
+        return new RegExp(e).test(url);
+      });
+    });
+  });
+  const remapped = matches.map(([title, advisories]) => {
+    return {
+      component: title,
+      version: "-",
+      detection: "url",
+      vulnerabilities: advisories.map((a) => {
+        return {
+          ...a,
+          identifiers: {
+            summary: a.summary,
+          },
+        };
+      }),
+    };
+  });
+  console.log("BD matches", remapped);
+  return remapped;
+}
+
 events.on("scan", function (details) {
   if (details.url.indexOf("chrome-extension://") === 0) return true;
 
@@ -63,6 +107,11 @@ events.on("scan", function (details) {
   }
   events.emit("result-ready", details, []);
   console.log("Scanning " + details.url + " ...");
+  var bd = scanUrlBackdoored(details.url);
+  if (bd.length > 0) {
+    events.emit("result-ready", details, bd);
+    return;
+  }
   var results = retire.scanUri(details.url, repo);
   if (results.length > 0) {
     events.emit("result-ready", details, results);
@@ -75,11 +124,66 @@ events.on("scan", function (details) {
   }
   download(details.url).then((content) => {
     events.emit("script-downloaded", details, content);
+    if (content.startsWith("/*! For license information please see ")) {
+      const licenseFilename = content
+        .split("/*! For license information please see ")[1]
+        .split(" */")[0];
+      const licenseUrl =
+        details.url
+          .split("?")[0]
+          .split("#")[0]
+          .split("/")
+          .slice(0, -1)
+          .join("/") +
+        "/" +
+        licenseFilename;
+      download(licenseUrl).then((licenseContent) => {
+        events.emit("script-downloaded", details, licenseContent);
+      });
+    }
   });
 });
 
+function unique(a) {
+  return a.reduce(function (p, c) {
+    if (!p.some((x) => x[0] == c[0] && x[1] == c[1])) p.push(c);
+    return p;
+  }, []);
+}
+
+function astScan(content, details, contentResults) {
+  chrome.runtime.sendMessage(
+    {
+      type: "astScan",
+      url: details.url,
+      content,
+    },
+    (response) => {
+      if (!response) {
+        console.warn("No response", chrome.runtime.lastError);
+        return;
+      }
+      console.log("A response was received", response.data);
+      const astResults = response.results;
+      console.log("Results from the service worker", astResults);
+      var results = astResults.filter((x) => {
+        return !contentResults.some(
+          (b) => x.component == b.component && x.version == b.version
+        );
+      });
+      console.log("Results from the service worker after filtering", results);
+      if (results.length > 0) {
+        events.emit("result-ready", details, results);
+      }
+    }
+  );
+}
+
 events.on("script-downloaded", function (details, content) {
+  console.log("Scanning content of " + details.url + " ...");
+  const bs = Date.now();
   var results = retire.scanFileContent(content, repo, hasher);
+  astScan(content, details, results);
   if (results.length > 0) {
     events.emit("result-ready", details, results);
     return true;
@@ -90,6 +194,7 @@ events.on("script-downloaded", function (details, content) {
 });
 
 events.on("sandbox", function (details, content) {
+  console.log("Sending to the sandbox");
   sandboxWin.postMessage(
     {
       tabId: details.tabId,
@@ -139,7 +244,7 @@ setInterval(() => {
 }, 5000);
 
 downloadRepo().then(() => {
-  chrome.runtime.sendMessage({ type: "repo-ready" });
+  chrome.runtime.sendMessage({ type: "repo-ready", repo: repo });
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "scan") {
       events.emit("scan", msg.details);

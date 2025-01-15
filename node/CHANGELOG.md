@@ -1,11 +1,93 @@
 # Changelog
 
+## [5.2.5]
+
+### Bugfix
+
+- CLI argument `--ext` was not working
+
+## [5.2.4]
+
+### Bugfix
+
+- Fix name vs group for scoped components in CycloneDX output
+
+## [5.2.3]
+
+### Bugfix
+
+- Fix license handling for complex licenses
+
+## [5.2.2]
+
+### Bugfix
+
+- Encode purls correctly in SBOM
+
+## [5.2.1]
+
+### Bugfix
+
+- Add missing CWEs in response
+
+## [5.2.0]
+
+### Enhancement
+
+- Add license information to SBOM
+
+## [5.1.4]
+
+### Bugfix
+
+- Fix bug where deepScan would sometimes not report vulnerabilities
+
+## [5.1.3]
+
+### Bugfix
+
+- Use URI detector on file paths as well
+
+## [5.1.2]
+
+### Bugfix
+
+- JSON format should not include results without vulnerabilities unless `--verbose` is specified.
+
+## [5.1.1]
+
+### Bugfix
+
+- Remove duplicates in filename output in CycloneDX JSON formats
+
+## [5.1.0]
+
+### Add
+
+- Support for CycloneDX 1.6 JSON as output format
+- Adding file location as property in CycloneDX 1.4 JSON output
+
+## [5.0.1]
+
+### Fix
+
+- Fix filename issue for windows file paths
+
+## [5.0.0]
+
+No changes. Just moving from beta to final.
+
+## [5.0.0-beta.1]
+
+### Added
+
+- Deepscan option with `--deep` where retire.js will also try to detect libraries using JavaScript AST (slower)
+
 ## [4.4.2]
 
 ### Fix
 
 - Fix matching to include all matches
-
 
 ## [4.4.1]
 

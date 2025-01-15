@@ -42,7 +42,7 @@ const prg = program
   .option('--proxy <url>', 'Proxy url (http://some.host:8080)')
   .option(
     '--outputformat <format>',
-    'Valid formats: text, json, jsonsimple, depcheck (experimental), cyclonedx and cyclonedxJSON',
+    'Valid formats: text, json, jsonsimple, depcheck (experimental), cyclonedx, cyclonedxJSON and cyclonedxJSON1_6',
   )
   .option('--outputpath <path>', 'File to which output should be written')
   .option('--ignore <paths>', 'Comma delimited list of paths to ignore')
@@ -63,6 +63,7 @@ const prg = program
     'Use the specified certificate file to verify the peer used for fetching remote jsrepo/noderepo files',
   )
   .option('--includeOsv', 'Include OSV advisories in the output')
+  .option('--deep', 'Deep scan (slower and experimental)')
   .parse()
   .opts();
 
@@ -70,7 +71,9 @@ const colorwarn = prg.colors ? colors.red : (x: string) => x;
 const jsrepolocation: string[] = (prg.jsrepo ?? "'central'")
   .split(',')
   .map((x: string) =>
-    x === "'central'" ? 'https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository.json' : x,
+    x === "'central'"
+      ? 'https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository-v4.json'
+      : x,
   );
 
 const ignorefile = prg.ignoreFile ?? defaultIgnoreFiles.filter((x) => fs.existsSync(x))[0];
@@ -110,6 +113,8 @@ const config: Options = {
   includeOsv: !!prg.includeOsv,
   verbose: !!prg.verbose,
   proxy: prg.proxy,
+  deep: !!prg.deep,
+  ext: prg.ext ?? 'js',
 };
 
 log.info(`retire.js v${retire.version}`);

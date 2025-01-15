@@ -104,7 +104,7 @@ export function validateRepository(
         bowername: z.array(z.string().regex(/^[a-z0-9.-]+$/i)).optional(),
         basePurl: z
           .string()
-          .regex(/^pkg:[a-z0-9/]+$/i)
+          .regex(/^pkg:[a-z0-9%.-/]+$/i)
           .optional(),
         npmname: z
           .string()
@@ -119,8 +119,18 @@ export function validateRepository(
             filecontent: z.array(regexValidator).optional(),
             filecontentreplace: z.array(replaceValidator).optional(),
             hashes: z.record(z.string().regex(/^[a-f0-9]+$/i), versionValidator).optional(),
+            ast: z.array(z.string()).optional(),
           })
           .strict(),
+        licenses: z
+          .array(
+            z
+              .string()
+              .regex(
+                /(\([A-Za-z\-0-9.]+( OR [A-Za-z\-0-9.]+)+\)|[A-Za-z\-0-9.]+) >=[0-9.]+( <[0-9.]+)?(;>=[0-9.]+( <[0-9.]+)?)*/,
+              ),
+          )
+          .optional(),
       })
       .strict(),
   );
